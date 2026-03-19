@@ -1,0 +1,199 @@
+{
+    "name": "WF4_Error_Handler",
+    "nodes": [
+        {
+            "parameters": {},
+            "id": "error-trigger",
+            "name": "Error Trigger",
+            "type": "n8n-nodes-base.errorTrigger",
+            "typeVersion": 1,
+            "position": [
+                240,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extraer información completa del error desde el contexto del Error Trigger\nconst errData = $input.item.json;\n\n// Nombre del workflow donde ocurrió el error\nconst workflow = errData.workflow?.name ?? 'Desconocido';\n\n// Nodo donde ocurrió el error\nconst paso = errData.execution?.lastNodeExecuted ?? 'Desconocido';\n\n// Mensaje de error\nconst errorMsg = errData.error?.message ?? 'Sin mensaje de error';\n\n// ID de ejecución\nconst executionId = errData.execution?.id ?? 'N/A';\n\n// Modo de ejecución (manual, trigger, etc.)\nconst mode = errData.execution?.mode ?? 'N/A';\n\n// Stack trace si existe\nconst stack = errData.error?.stack ?? '';\n\n// Payload: información útil del contexto del error\nconst payload = {\n    workflow_id: errData.workflow?.id ?? null,\n    execution_id: executionId,\n    mode: mode,\n    last_node: paso,\n    error_name: errData.error?.name ?? 'Error',\n    stack_trace: stack.substring(0, 500), // Limitar a 500 chars\n    timestamp: new Date().toISOString()\n};\n\n// Línea para el archivo de log (formato legible)\nconst timestamp = new Date().toISOString();\nconst logLine = `[${timestamp}] ERROR en \"${workflow}\" | Nodo: \"${paso}\" | Msg: ${errorMsg} | ExecID: ${executionId}\\n`;\n\nreturn [{\n    json: {\n        workflow,\n        paso,\n        errorMsg,\n        payload,\n        logLine\n    }\n}];\n"
+            },
+            "id": "code-extraer-error",
+            "name": "Extraer Datos del Error",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                460,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO error_log (workflow, paso, error_msg, payload)\nVALUES (\n  '{{ $json.workflow }}',\n  '{{ $json.paso }}',\n  '{{ $json.errorMsg.replace(/'/g, \"''\") }}',\n  '{{ JSON.stringify($json.payload) }}'::jsonb\n)\nRETURNING id;",
+                "options": {}
+            },
+            "id": "pg-insert-error-log",
+            "name": "INSERT error_log",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                680,
+                300
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO alertas (tipo, nivel, mensaje, producto_id, salida_id)\nVALUES (\n  'ERROR',\n  'CRITICAL',\n  'Error en workflow: {{ $('Extraer Datos del Error').item.json.workflow }} | Nodo: {{ $('Extraer Datos del Error').item.json.paso }} | {{ $('Extraer Datos del Error').item.json.errorMsg.substring(0, 200) }}',\n  NULL,\n  NULL\n);",
+                "options": {}
+            },
+            "id": "pg-insert-alerta-error",
+            "name": "INSERT Alerta ERROR",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                900,
+                300
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Construir el contenido a escribir en el archivo de log\nconst logLine = $('Extraer Datos del Error').item.json.logLine;\n\n// Convertir el texto a Buffer binario (requerido por Write Binary File)\nconst buffer = Buffer.from(logLine, 'utf8');\n\nreturn [{\n    json: {},\n    binary: {\n        data: {\n            data: buffer.toString('base64'),\n            mimeType: 'text/plain',\n            fileName: 'errors.log'\n        }\n    }\n}];\n"
+            },
+            "id": "code-preparar-log",
+            "name": "Preparar Línea de Log",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1120,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "append",
+                "fileName": "/data/logs/errors.log",
+                "dataPropertyName": "data",
+                "options": {}
+            },
+            "id": "write-errors-log",
+            "name": "Escribir errors.log",
+            "type": "n8n-nodes-base.writeBinaryFile",
+            "typeVersion": 1,
+            "position": [
+                1340,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO audit_log (workflow, accion, detalle, payload_resumen)\nVALUES (\n  'WF4_Error_Handler',\n  'ERROR_CAPTURADO',\n  'Error global capturado de: {{ $('Extraer Datos del Error').item.json.workflow }}',\n  '{{ JSON.stringify({ workflow: $('Extraer Datos del Error').item.json.workflow, paso: $('Extraer Datos del Error').item.json.paso, error: $('Extraer Datos del Error').item.json.errorMsg.substring(0, 200) }) }}'::jsonb\n);",
+                "options": {}
+            },
+            "id": "pg-audit-wf4",
+            "name": "INSERT Audit Log WF4",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1560,
+                300
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Error Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Extraer Datos del Error",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extraer Datos del Error": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT error_log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "INSERT error_log": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Alerta ERROR",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "INSERT Alerta ERROR": {
+            "main": [
+                [
+                    {
+                        "node": "Preparar Línea de Log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Preparar Línea de Log": {
+            "main": [
+                [
+                    {
+                        "node": "Escribir errors.log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Escribir errors.log": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Audit Log WF4",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true,
+        "callerPolicy": "workflowsFromSameOwner"
+    },
+    "pinData": {},
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "local"
+    }
+}

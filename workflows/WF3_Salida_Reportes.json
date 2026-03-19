@@ -1,0 +1,284 @@
+{
+    "name": "WF3_Salida_Reportes",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "weeks",
+                            "triggerAtDay": [
+                                1
+                            ],
+                            "triggerAtHour": 8,
+                            "triggerAtMinute": 0
+                        }
+                    ]
+                }
+            },
+            "id": "cron-wf3",
+            "name": "Cron Semanal (Lunes 8am)",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [
+                240,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "SELECT p.sku, p.nombre, p.categoria, p.stock_actual, p.stock_minimo, p.fecha_vencimiento::text, CASE WHEN p.stock_actual <= p.stock_minimo THEN 'STOCK_BAJO' WHEN p.fecha_vencimiento IS NOT NULL AND p.fecha_vencimiento <= CURRENT_DATE + INTERVAL '30 days' THEN 'VENCIMIENTO_PROXIMO' ELSE 'OK' END AS estado FROM productos p WHERE p.activo = true ORDER BY estado DESC, p.sku;",
+                "options": {}
+            },
+            "id": "pg-inventario",
+            "name": "SELECT Inventario Completo",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                460,
+                300
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "SELECT a.tipo, a.nivel, a.mensaje, a.resuelta, a.created_at::text, p.sku, p.nombre FROM alertas a LEFT JOIN productos p ON a.producto_id = p.id WHERE a.created_at >= CURRENT_DATE - INTERVAL '7 days' ORDER BY a.created_at DESC;",
+                "options": {}
+            },
+            "id": "pg-alertas",
+            "name": "SELECT Alertas Semana",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                680,
+                300
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const inventario = $('SELECT Inventario Completo').all().map(i => i.json);\nconst alertas = $('SELECT Alertas Semana').all().map(a => a.json);\nconst fecha = new Date().toISOString().split('T')[0];\n\n// Obtener resumen de salidas de la semana mediante los movimientos\nconst salidaSemana = inventario; // placeholder para mantener estructura\n\n// === CSV ===\nconst csvHeader = 'SKU,Nombre,Categoria,Stock Actual,Stock Minimo,Fecha Vencimiento,Estado\\n';\nconst csvRows = inventario.map(p =>\n  `\"${p.sku}\",\"${p.nombre}\",\"${p.categoria}\",${p.stock_actual},${p.stock_minimo},\"${p.fecha_vencimiento ?? 'N/A'}\",\"${p.estado}\"`\n).join('\\n');\nconst csvContent = csvHeader + csvRows;\n\n// === HTML ===\nconst alertasHTML = alertas.map(a =>\n  `<tr style=\"background:${a.nivel === 'CRITICAL' ? '#fee2e2' : a.nivel === 'WARNING' ? '#fef9c3' : '#f0fdf4'}\">\n    <td>${a.tipo}</td><td>${a.nivel}</td><td>${a.sku ?? '-'}</td>\n    <td>${a.mensaje}</td><td>${a.resuelta ? '✅' : '❌'}</td>\n    <td>${a.created_at?.split('T')[0] ?? ''}</td>\n  </tr>`\n).join('');\n\nconst inventarioHTML = inventario.map(p =>\n  `<tr style=\"background:${p.estado === 'STOCK_BAJO' ? '#fee2e2' : p.estado === 'VENCIMIENTO_PROXIMO' ? '#fef9c3' : 'white'}\">\n    <td>${p.sku}</td><td>${p.nombre}</td><td>${p.categoria}</td>\n    <td>${p.stock_actual}</td><td>${p.stock_minimo}</td>\n    <td>${p.fecha_vencimiento ?? 'N/A'}</td><td><b>${p.estado}</b></td>\n  </tr>`\n).join('');\n\nconst htmlContent = `<!DOCTYPE html>\n<html lang=\"es\">\n<head><meta charset=\"UTF-8\"><title>Reporte Inventario - ${fecha}</title>\n<style>body{font-family:Arial,sans-serif;padding:20px}h1{color:#1e3a5f}table{border-collapse:collapse;width:100%;margin-bottom:24px}th{background:#1e3a5f;color:white;padding:8px;text-align:left}td{border:1px solid #ddd;padding:6px}</style>\n</head><body>\n<h1>📦 Reporte Semanal de Inventario</h1>\n<p>Generado: ${new Date().toLocaleString('es-GT')} | Productos: ${inventario.length} | Alertas semana: ${alertas.length}</p>\n<h2>📊 Estado del Inventario</h2>\n<table><tr><th>SKU</th><th>Nombre</th><th>Categoría</th><th>Stock Actual</th><th>Stock Mínimo</th><th>Vencimiento</th><th>Estado</th></tr>\n${inventarioHTML}</table>\n<h2>🔔 Alertas de la Semana</h2>\n<table><tr><th>Tipo</th><th>Nivel</th><th>SKU</th><th>Mensaje</th><th>Resuelta</th><th>Fecha</th></tr>\n${alertasHTML || '<tr><td colspan=\"6\">Sin alertas esta semana</td></tr>'}</table>\n</body></html>`;\n\n// === TXT ===\nconst txtContent = `=== REPORTE SEMANAL DE INVENTARIO ===\nFecha: ${fecha}\nTotal productos activos: ${inventario.length}\nAlertas generadas esta semana: ${alertas.length}\n\nPRODUCTOS CON PROBLEMAS:\n${\n  inventario.filter(p => p.estado !== 'OK')\n    .map(p => `  - [${p.estado}] ${p.nombre} (${p.sku}) Stock: ${p.stock_actual}`)\n    .join('\\n') || '  Ninguno'\n}\n\nReporte completo: /data/reports/reporte_inventario_${fecha}.html\n`;\n\nreturn [\n  { json: { tipo: 'csv', contenido: csvContent, archivo: `reporte_inventario_${fecha}.csv` } },\n  { json: { tipo: 'html', contenido: htmlContent, archivo: `reporte_inventario_${fecha}.html` } },\n  { json: { tipo: 'txt', contenido: txtContent, archivo: `notificacion_reporte_${fecha}.txt` } }\n];"
+            },
+            "id": "code-formato",
+            "name": "Formatear CSV y HTML",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                900,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const item = $input.item.json;\nconst encoder = new TextEncoder();\nconst bytes = encoder.encode(item.contenido);\nconst mimeTypes = { csv: 'text/csv', html: 'text/html', txt: 'text/plain' };\nreturn [{\n  json: {\n    carpeta: item.tipo === 'txt' ? '/data/outbox' : '/data/reports',\n    archivo: item.archivo,\n    tipo: item.tipo\n  },\n  binary: {\n    data: {\n      data: Buffer.from(bytes).toString('base64'),\n      mimeType: mimeTypes[item.tipo] ?? 'text/plain',\n      fileName: item.archivo,\n      fileExtension: item.tipo\n    }\n  }\n}];"
+            },
+            "id": "code-to-binary",
+            "name": "Convertir a Binario",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1120,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {},
+                    "conditions": [
+                        {
+                            "id": "es-outbox",
+                            "leftValue": "={{ $json.tipo }}",
+                            "rightValue": "txt",
+                            "operator": {
+                                "type": "string",
+                                "operation": "equals"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "if-outbox",
+            "name": "Es Notificación TXT?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                1340,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "fileName": "=/data/outbox/{{ $json.archivo }}",
+                "dataPropertyName": "data",
+                "options": {}
+            },
+            "id": "write-outbox",
+            "name": "Escribir TXT /outbox",
+            "type": "n8n-nodes-base.writeBinaryFile",
+            "typeVersion": 1,
+            "position": [
+                1560,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "fileName": "=/data/reports/{{ $json.archivo }}",
+                "dataPropertyName": "data",
+                "options": {}
+            },
+            "id": "write-reports",
+            "name": "Escribir CSV/HTML /reports",
+            "type": "n8n-nodes-base.writeBinaryFile",
+            "typeVersion": 1,
+            "position": [
+                1560,
+                420
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO audit_log (workflow, accion, detalle, payload_resumen)\nVALUES (\n  'WF3_Salida_Reportes',\n  'REPORTE_GENERADO',\n  'Reporte semanal generado correctamente',\n  '{\"fecha\": \"{{ new Date().toISOString().split(\"T\")[0] }}\"}'::jsonb\n);",
+                "options": {}
+            },
+            "id": "pg-audit-wf3",
+            "name": "INSERT Audit Log WF3",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1780,
+                300
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Cron Semanal (Lunes 8am)": {
+            "main": [
+                [
+                    {
+                        "node": "SELECT Inventario Completo",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "SELECT Inventario Completo": {
+            "main": [
+                [
+                    {
+                        "node": "SELECT Alertas Semana",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "SELECT Alertas Semana": {
+            "main": [
+                [
+                    {
+                        "node": "Formatear CSV y HTML",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Formatear CSV y HTML": {
+            "main": [
+                [
+                    {
+                        "node": "Convertir a Binario",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Convertir a Binario": {
+            "main": [
+                [
+                    {
+                        "node": "Es Notificación TXT?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Es Notificación TXT?": {
+            "main": [
+                [
+                    {
+                        "node": "Escribir TXT /outbox",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Escribir CSV/HTML /reports",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Escribir TXT /outbox": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Audit Log WF3",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Escribir CSV/HTML /reports": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Audit Log WF3",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true,
+        "callerPolicy": "workflowsFromSameOwner",
+        "errorWorkflow": "WF4_Error_Handler"
+    },
+    "pinData": {},
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "local"
+    }
+}

@@ -1,0 +1,621 @@
+{
+    "name": "WF1_Ingesta_Inventario",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "inventory/intake",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook-node",
+            "name": "Webhook Entrada",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                240,
+                300
+            ],
+            "webhookId": "wf1-inventory-intake"
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "f1",
+                            "name": "sku",
+                            "value": "={{ $json.body.sku?.toString().trim().toUpperCase() }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "f2",
+                            "name": "nombre",
+                            "value": "={{ $json.body.nombre ?? '' }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "f3",
+                            "name": "categoria",
+                            "value": "={{ $json.body.categoria ?? 'General' }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "f4",
+                            "name": "cantidad",
+                            "value": "={{ Number($json.body.cantidad) }}",
+                            "type": "number"
+                        },
+                        {
+                            "id": "f5",
+                            "name": "stock_minimo",
+                            "value": "={{ Number($json.body.stock_minimo ?? 0) }}",
+                            "type": "number"
+                        },
+                        {
+                            "id": "f6",
+                            "name": "fecha_vencimiento",
+                            "value": "={{ $json.body.fecha_vencimiento ?? null }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "f7",
+                            "name": "tipo_evento",
+                            "value": "={{ $json.body.tipo_evento?.toString().toUpperCase() }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "f8",
+                            "name": "tipo_salida",
+                            "value": "={{ $json.body.tipo_salida?.toString().toUpperCase() ?? 'VENTA' }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "f9",
+                            "name": "destinatario",
+                            "value": "={{ $json.body.destinatario ?? null }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "f10",
+                            "name": "precio_unitario",
+                            "value": "={{ Number($json.body.precio_unitario ?? 0) }}",
+                            "type": "number"
+                        },
+                        {
+                            "id": "f11",
+                            "name": "referencia",
+                            "value": "={{ $json.body.referencia ?? null }}",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "set-normalize",
+            "name": "Normalizar Campos",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                460,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": false,
+                        "leftValue": "",
+                        "typeValidation": "strict"
+                    },
+                    "conditions": [
+                        {
+                            "id": "c1",
+                            "leftValue": "={{ $json.sku }}",
+                            "rightValue": "",
+                            "operator": {
+                                "type": "string",
+                                "operation": "notEmpty"
+                            }
+                        },
+                        {
+                            "id": "c2",
+                            "leftValue": "={{ $json.cantidad }}",
+                            "rightValue": 0,
+                            "operator": {
+                                "type": "number",
+                                "operation": "gt"
+                            }
+                        },
+                        {
+                            "id": "c3",
+                            "leftValue": "={{ $json.tipo_evento }}",
+                            "rightValue": "",
+                            "operator": {
+                                "type": "string",
+                                "operation": "notEmpty"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "if-validacion",
+            "name": "Validar Payload",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                680,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO error_log (workflow, paso, error_msg, payload)\nVALUES (\n  'WF1_Ingesta_Inventario',\n  'IF_Validacion',\n  'Payload inválido: falta sku, cantidad > 0 o tipo_evento',\n  '{{ JSON.stringify($json) }}'::jsonb\n);",
+                "options": {}
+            },
+            "id": "pg-error-validacion",
+            "name": "LOG Error Validación",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                900,
+                500
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={ \"ok\": false, \"error\": \"Payload inválido: se requiere sku, cantidad > 0 y tipo_evento\" }",
+                "options": {
+                    "responseCode": 400
+                }
+            },
+            "id": "respond-error-400",
+            "name": "Responder 400 Error",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                1120,
+                500
+            ]
+        },
+        {
+            "parameters": {
+                "rules": {
+                    "values": [
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": false
+                                },
+                                "conditions": [
+                                    {
+                                        "id": "s1",
+                                        "leftValue": "={{ $json.tipo_evento }}",
+                                        "rightValue": "ENTRADA",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ],
+                                "combinator": "and"
+                            }
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": false
+                                },
+                                "conditions": [
+                                    {
+                                        "id": "s2",
+                                        "leftValue": "={{ $json.tipo_evento }}",
+                                        "rightValue": "SALIDA",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ],
+                                "combinator": "and"
+                            }
+                        }
+                    ]
+                },
+                "options": {
+                    "fallbackOutput": "extra"
+                }
+            },
+            "id": "switch-tipo-evento",
+            "name": "Switch Tipo Evento",
+            "type": "n8n-nodes-base.switch",
+            "typeVersion": 3.2,
+            "position": [
+                900,
+                280
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO productos (sku, nombre, categoria, stock_actual, stock_minimo, fecha_vencimiento)\nVALUES (\n  '{{ $json.sku }}',\n  '{{ $json.nombre }}',\n  '{{ $json.categoria }}',\n  {{ $json.cantidad }},\n  {{ $json.stock_minimo }},\n  {{ $json.fecha_vencimiento ? \"'\" + $json.fecha_vencimiento + \"'\" : 'NULL' }}\n)\nON CONFLICT (sku) DO UPDATE SET\n  stock_actual = productos.stock_actual + EXCLUDED.stock_actual,\n  stock_minimo = CASE WHEN EXCLUDED.stock_minimo > 0 THEN EXCLUDED.stock_minimo ELSE productos.stock_minimo END,\n  updated_at = now()\nRETURNING id, sku, stock_actual;",
+                "options": {}
+            },
+            "id": "pg-upsert-producto-entrada",
+            "name": "UPSERT Producto (ENTRADA)",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1120,
+                160
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO movimientos (producto_id, tipo, cantidad, origen, referencia)\nVALUES (\n  '{{ $json.id }}',\n  'ENTRADA',\n  {{ $('Normalizar Campos').item.json.cantidad }},\n  'WEBHOOK',\n  'WF1 - Entrada de stock'\n);",
+                "options": {}
+            },
+            "id": "pg-mov-entrada",
+            "name": "INSERT Movimiento ENTRADA",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1340,
+                160
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "SELECT id, stock_actual FROM productos WHERE sku = '{{ $('Normalizar Campos').item.json.sku }}' AND activo = true LIMIT 1;",
+                "options": {}
+            },
+            "id": "pg-check-stock",
+            "name": "Verificar Stock Disponible",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1120,
+                320
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": false
+                    },
+                    "conditions": [
+                        {
+                            "id": "stock-ok",
+                            "leftValue": "={{ $json.stock_actual }}",
+                            "rightValue": "={{ $('Normalizar Campos').item.json.cantidad }}",
+                            "operator": {
+                                "type": "number",
+                                "operation": "gte"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "if-stock-suficiente",
+            "name": "Stock Suficiente?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                1340,
+                320
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO error_log (workflow, paso, error_msg, payload)\nVALUES (\n  'WF1_Ingesta_Inventario',\n  'IF_StockDisponible',\n  'Stock insuficiente para salida. Solicitado: {{ $('Normalizar Campos').item.json.cantidad }} | Disponible: {{ $('Verificar Stock Disponible').item.json.stock_actual }}',\n  '{{ JSON.stringify($('Normalizar Campos').item.json) }}'::jsonb\n);",
+                "options": {}
+            },
+            "id": "pg-error-stock",
+            "name": "LOG Error Stock",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1560,
+                460
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "WITH upd AS (\n  UPDATE productos SET\n    stock_actual = stock_actual - {{ $('Normalizar Campos').item.json.cantidad }},\n    updated_at = now()\n  WHERE id = '{{ $json.id }}'\n  RETURNING id\n)\nINSERT INTO salidas (producto_id, tipo_salida, destinatario, cantidad, precio_unitario, origen, referencia, fecha_salida)\nVALUES (\n  '{{ $json.id }}',\n  '{{ $('Normalizar Campos').item.json.tipo_salida }}',\n  {{ $('Normalizar Campos').item.json.destinatario ? \"'\" + $('Normalizar Campos').item.json.destinatario + \"'\" : 'NULL' }},\n  {{ $('Normalizar Campos').item.json.cantidad }},\n  {{ $('Normalizar Campos').item.json.precio_unitario }},\n  'WEBHOOK',\n  {{ $('Normalizar Campos').item.json.referencia ? \"'\" + $('Normalizar Campos').item.json.referencia + \"'\" : 'NULL' }},\n  CURRENT_DATE\n)\nRETURNING id;",
+                "options": {}
+            },
+            "id": "pg-salida",
+            "name": "INSERT Salida + Descuenta Stock",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1560,
+                280
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO movimientos (producto_id, tipo, cantidad, origen, referencia)\nSELECT\n  producto_id,\n  'SALIDA',\n  cantidad,\n  'WEBHOOK',\n  tipo_salida || CASE WHEN destinatario IS NOT NULL THEN ' - ' || destinatario ELSE '' END\nFROM salidas WHERE id = '{{ $json.id }}';",
+                "options": {}
+            },
+            "id": "pg-mov-salida",
+            "name": "INSERT Movimiento SALIDA",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1780,
+                280
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO audit_log (workflow, accion, detalle, payload_resumen)\nVALUES (\n  'WF1_Ingesta_Inventario',\n  '{{ $('Normalizar Campos').item.json.tipo_evento }}',\n  'Evento procesado para SKU: {{ $('Normalizar Campos').item.json.sku }}',\n  '{{ JSON.stringify({ sku: $('Normalizar Campos').item.json.sku, tipo_evento: $('Normalizar Campos').item.json.tipo_evento, cantidad: $('Normalizar Campos').item.json.cantidad, tipo_salida: $('Normalizar Campos').item.json.tipo_salida }) }}'::jsonb\n);",
+                "options": {}
+            },
+            "id": "pg-audit",
+            "name": "INSERT Audit Log",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                2000,
+                220
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={{ JSON.stringify({ ok: true, tipo_evento: $('Normalizar Campos').item.json.tipo_evento, sku: $('Normalizar Campos').item.json.sku, mensaje: 'Operación registrada correctamente' }) }}",
+                "options": {
+                    "responseCode": 200
+                }
+            },
+            "id": "respond-ok",
+            "name": "Responder 200 OK",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                2220,
+                220
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook Entrada": {
+            "main": [
+                [
+                    {
+                        "node": "Normalizar Campos",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalizar Campos": {
+            "main": [
+                [
+                    {
+                        "node": "Validar Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Validar Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Switch Tipo Evento",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "LOG Error Validación",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "LOG Error Validación": {
+            "main": [
+                [
+                    {
+                        "node": "Responder 400 Error",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Switch Tipo Evento": {
+            "main": [
+                [
+                    {
+                        "node": "UPSERT Producto (ENTRADA)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Verificar Stock Disponible",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "UPSERT Producto (ENTRADA)": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Movimiento ENTRADA",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "INSERT Movimiento ENTRADA": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Audit Log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Verificar Stock Disponible": {
+            "main": [
+                [
+                    {
+                        "node": "Stock Suficiente?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Stock Suficiente?": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Salida + Descuenta Stock",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "LOG Error Stock",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "LOG Error Stock": {
+            "main": [
+                [
+                    {
+                        "node": "Responder 400 Error",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "INSERT Salida + Descuenta Stock": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Movimiento SALIDA",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "INSERT Movimiento SALIDA": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Audit Log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "INSERT Audit Log": {
+            "main": [
+                [
+                    {
+                        "node": "Responder 200 OK",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true,
+        "callerPolicy": "workflowsFromSameOwner",
+        "errorWorkflow": "WF4_Error_Handler"
+    },
+    "pinData": {},
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "local"
+    }
+}

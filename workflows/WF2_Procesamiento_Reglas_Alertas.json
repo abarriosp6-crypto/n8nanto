@@ -1,0 +1,496 @@
+{
+    "name": "WF2_Procesamiento_Reglas_Alertas",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "minutes",
+                            "minutesInterval": 5
+                        }
+                    ]
+                }
+            },
+            "id": "cron-wf2",
+            "name": "Cron cada 5 min",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.2,
+            "position": [
+                240,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "SELECT id, sku, nombre, stock_actual, stock_minimo, fecha_vencimiento FROM productos WHERE activo = true ORDER BY sku;",
+                "options": {}
+            },
+            "id": "pg-select-productos",
+            "name": "SELECT Productos Activos",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                460,
+                300
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "batchSize": 1,
+                "options": {}
+            },
+            "id": "split-productos",
+            "name": "Split por Producto",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                680,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": false
+                    },
+                    "conditions": [
+                        {
+                            "id": "c-stock",
+                            "leftValue": "={{ $json.stock_actual }}",
+                            "rightValue": "={{ $json.stock_minimo }}",
+                            "operator": {
+                                "type": "number",
+                                "operation": "lte"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "if-stock-bajo",
+            "name": "Stock Bajo?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                900,
+                180
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "SELECT id FROM alertas WHERE producto_id = '{{ $json.id }}' AND tipo = 'STOCK_BAJO' AND resuelta = false AND created_at > now() - interval '24 hours' LIMIT 1;",
+                "options": {}
+            },
+            "id": "pg-check-dup-stock",
+            "name": "¿Alerta Stock Duplicada?",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1120,
+                100
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {},
+                    "conditions": [
+                        {
+                            "id": "no-dup-stock",
+                            "leftValue": "={{ $json.id }}",
+                            "rightValue": "",
+                            "operator": {
+                                "type": "string",
+                                "operation": "empty"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "if-no-dup-stock",
+            "name": "No Duplicado Stock?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                1340,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO alertas (tipo, nivel, mensaje, producto_id)\nVALUES (\n  'STOCK_BAJO',\n  CASE WHEN {{ $('Split por Producto').item.json.stock_actual }} = 0 THEN 'CRITICAL' ELSE 'WARNING' END,\n  'Stock bajo para {{ $('Split por Producto').item.json.nombre }} (SKU: {{ $('Split por Producto').item.json.sku }}). Actual: {{ $('Split por Producto').item.json.stock_actual }} | Mínimo: {{ $('Split por Producto').item.json.stock_minimo }}',\n  '{{ $('Split por Producto').item.json.id }}'\n);",
+                "options": {}
+            },
+            "id": "pg-insert-alerta-stock",
+            "name": "INSERT Alerta Stock Bajo",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1560,
+                60
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": false
+                    },
+                    "conditions": [
+                        {
+                            "id": "c-venc",
+                            "leftValue": "={{ $('Split por Producto').item.json.fecha_vencimiento }}",
+                            "rightValue": "",
+                            "operator": {
+                                "type": "string",
+                                "operation": "notEmpty"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "if-tiene-vencimiento",
+            "name": "Tiene Fecha Vencimiento?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                900,
+                340
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "SELECT id FROM productos WHERE id = '{{ $('Split por Producto').item.json.id }}' AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento <= CURRENT_DATE + INTERVAL '{{ $env.N_DIAS_VENCIMIENTO ?? 30 }} days' AND fecha_vencimiento >= CURRENT_DATE LIMIT 1;",
+                "options": {}
+            },
+            "id": "pg-check-vencimiento",
+            "name": "Verificar Vencimiento Próximo",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1120,
+                300
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {},
+                    "conditions": [
+                        {
+                            "id": "c-prox",
+                            "leftValue": "={{ $json.id }}",
+                            "rightValue": "",
+                            "operator": {
+                                "type": "string",
+                                "operation": "notEmpty"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "if-vencimiento-proximo",
+            "name": "Vencimiento Próximo?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                1340,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "SELECT id FROM alertas WHERE producto_id = '{{ $('Split por Producto').item.json.id }}' AND tipo = 'VENCIMIENTO_PROXIMO' AND resuelta = false AND created_at > now() - interval '24 hours' LIMIT 1;",
+                "options": {}
+            },
+            "id": "pg-check-dup-venc",
+            "name": "¿Alerta Venc. Duplicada?",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                1560,
+                260
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {},
+                    "conditions": [
+                        {
+                            "id": "no-dup-venc",
+                            "leftValue": "={{ $json.id }}",
+                            "rightValue": "",
+                            "operator": {
+                                "type": "string",
+                                "operation": "empty"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "if-no-dup-venc",
+            "name": "No Duplicado Venc.?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [
+                1780,
+                260
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO alertas (tipo, nivel, mensaje, producto_id)\nVALUES (\n  'VENCIMIENTO_PROXIMO',\n  'WARNING',\n  '{{ $('Split por Producto').item.json.nombre }} vence el {{ $('Split por Producto').item.json.fecha_vencimiento }}. Quedan menos de {{ $env.N_DIAS_VENCIMIENTO ?? 30 }} días.',\n  '{{ $('Split por Producto').item.json.id }}'\n);",
+                "options": {}
+            },
+            "id": "pg-insert-alerta-venc",
+            "name": "INSERT Alerta Vencimiento",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                2000,
+                220
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO audit_log (workflow, accion, detalle, payload_resumen)\nVALUES (\n  'WF2_Procesamiento_Reglas_Alertas',\n  'CICLO_COMPLETADO',\n  'Revisión de alertas completada',\n  '{\"timestamp\": \"{{ new Date().toISOString() }}\"}'::jsonb\n);",
+                "options": {}
+            },
+            "id": "pg-audit-wf2",
+            "name": "INSERT Audit Log WF2",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.5,
+            "position": [
+                2220,
+                300
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "supabase-cred",
+                    "name": "Supabase Inventario"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Cron cada 5 min": {
+            "main": [
+                [
+                    {
+                        "node": "SELECT Productos Activos",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "SELECT Productos Activos": {
+            "main": [
+                [
+                    {
+                        "node": "Split por Producto",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split por Producto": {
+            "main": [
+                [
+                    {
+                        "node": "Stock Bajo?",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Tiene Fecha Vencimiento?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Stock Bajo?": {
+            "main": [
+                [
+                    {
+                        "node": "¿Alerta Stock Duplicada?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                []
+            ]
+        },
+        "¿Alerta Stock Duplicada?": {
+            "main": [
+                [
+                    {
+                        "node": "No Duplicado Stock?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "No Duplicado Stock?": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Alerta Stock Bajo",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                []
+            ]
+        },
+        "INSERT Alerta Stock Bajo": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Audit Log WF2",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Tiene Fecha Vencimiento?": {
+            "main": [
+                [
+                    {
+                        "node": "Verificar Vencimiento Próximo",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                []
+            ]
+        },
+        "Verificar Vencimiento Próximo": {
+            "main": [
+                [
+                    {
+                        "node": "Vencimiento Próximo?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Vencimiento Próximo?": {
+            "main": [
+                [
+                    {
+                        "node": "¿Alerta Venc. Duplicada?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                []
+            ]
+        },
+        "¿Alerta Venc. Duplicada?": {
+            "main": [
+                [
+                    {
+                        "node": "No Duplicado Venc.?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "No Duplicado Venc.?": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Alerta Vencimiento",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                []
+            ]
+        },
+        "INSERT Alerta Vencimiento": {
+            "main": [
+                [
+                    {
+                        "node": "INSERT Audit Log WF2",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true,
+        "callerPolicy": "workflowsFromSameOwner",
+        "errorWorkflow": "WF4_Error_Handler"
+    },
+    "pinData": {},
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "local"
+    }
+}
