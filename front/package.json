@@ -1,0 +1,9 @@
+{
+  "name": "inventario-front-local",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Servidor basico para frontend de pruebas n8n",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

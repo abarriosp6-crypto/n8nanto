@@ -88,6 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_alertas_salida_id ON public.alertas(salida_id);
 CREATE INDEX IF NOT EXISTS idx_alertas_resuelta ON public.alertas(resuelta);
 CREATE INDEX IF NOT EXISTS idx_alertas_created_at ON public.alertas(created_at);
 
+
 -- ============================================
 -- TABLA: audit_log
 -- ============================================

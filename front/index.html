@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel de Inventario | n8n</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="bg-glow bg-glow-a"></div>
+  <div class="bg-glow bg-glow-b"></div>
+
+  <main class="container">
+    <header class="hero">
+      <p class="eyebrow">Sistema de Inventario Inteligente</p>
+      <h1>Panel de Pruebas WF1-WF4</h1>
+      <p class="subtitle">Controla ingesta, revisa ejecuciones cron y monitorea reportes/errores de tus workflows en una sola vista.</p>
+    </header>
+
+    <section class="card">
+      <h2>Configuracion</h2>
+      <div class="grid two">
+        <label>
+          URL base n8n
+          <input id="baseUrl" type="url" value="http://localhost:5678" placeholder="http://localhost:5678">
+        </label>
+        <label>
+          Endpoint
+          <input id="endpoint" type="text" value="/webhook/inventory/intake" placeholder="/webhook/inventory/intake">
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>WF1 - Ingesta Inventario</h2>
+        <div class="switch-wrap">
+          <button class="chip is-active" data-evento="ENTRADA" type="button">Entrada</button>
+          <button class="chip" data-evento="SALIDA" type="button">Salida</button>
+        </div>
+      </div>
+
+      <form id="inventoryForm" class="grid two">
+        <input id="tipo_evento" name="tipo_evento" type="hidden" value="ENTRADA">
+
+        <label>
+          SKU
+          <input id="sku" name="sku" required placeholder="TEST001" autocomplete="off">
+        </label>
+
+        <label>
+          Cantidad
+          <input id="cantidad" name="cantidad" type="number" min="1" required value="1">
+        </label>
+
+        <label class="entrada-field">
+          Nombre
+          <input id="nombre" name="nombre" placeholder="Producto Test">
+        </label>
+
+        <label class="entrada-field">
+          Categoria
+          <input id="categoria" name="categoria" placeholder="General">
+        </label>
+
+        <label class="entrada-field">
+          Stock minimo
+          <input id="stock_minimo" name="stock_minimo" type="number" min="0" value="0">
+        </label>
+
+        <label class="entrada-field">
+          Fecha vencimiento
+          <input id="fecha_vencimiento" name="fecha_vencimiento" type="date">
+        </label>
+
+        <label class="salida-field hidden">
+          Tipo de salida
+          <select id="tipo_salida" name="tipo_salida">
+            <option value="VENTA">VENTA</option>
+            <option value="CONSUMO_INTERNO">CONSUMO_INTERNO</option>
+            <option value="DONACION">DONACION</option>
+            <option value="MERMA">MERMA</option>
+            <option value="OTRO">OTRO</option>
+          </select>
+        </label>
+
+        <label class="salida-field hidden">
+          Destinatario
+          <input id="destinatario" name="destinatario" placeholder="Cliente / Area">
+        </label>
+
+        <label class="salida-field hidden">
+          Precio unitario
+          <input id="precio_unitario" name="precio_unitario" type="number" min="0" step="0.01" value="0">
+        </label>
+
+        <label class="salida-field hidden">
+          Referencia
+          <input id="referencia" name="referencia" placeholder="Ticket #001">
+        </label>
+
+        <div class="actions">
+          <button id="btnEnviar" type="submit" class="btn-primary">Enviar evento</button>
+          <button id="btnEjemplo" type="button" class="btn-secondary">Cargar ejemplo</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Respuesta</h2>
+      <p id="status" class="status idle">Listo para enviar</p>
+      <pre id="responseBox" class="response">{}</pre>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>WF2 - Reglas y Alertas (Cron)</h2>
+        <button id="btnRefreshHealth" class="btn-secondary" type="button">Actualizar estado</button>
+      </div>
+      <p class="subtitle">WF2 corre automaticamente cada 5 minutos desde n8n. Aqui validas estado del panel y ejecutas chequeos rapidos.</p>
+      <pre id="wf2Health" class="response">{}</pre>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>WF3 - Reportes Generados</h2>
+        <div class="switch-wrap">
+          <button id="btnGenerateReport" class="btn-primary" type="button">Generar reporte ahora</button>
+          <button id="btnRefreshReports" class="btn-secondary" type="button">Recargar reportes</button>
+        </div>
+      </div>
+      <label>
+        Endpoint WF3 manual
+        <input id="reportEndpoint" type="text" value="/webhook/reports/generate" placeholder="/webhook/reports/generate">
+      </label>
+      <div id="reportsList" class="list"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>WF4 - Error Handler</h2>
+        <button id="btnRefreshErrors" class="btn-secondary" type="button">Recargar errores</button>
+      </div>
+      <pre id="errorsBox" class="response"></pre>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

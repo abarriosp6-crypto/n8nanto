@@ -27,6 +27,23 @@
         },
         {
             "parameters": {
+                "httpMethod": "POST",
+                "path": "reports/generate",
+                "responseMode": "onReceived",
+                "options": {}
+            },
+            "id": "webhook-wf3-manual",
+            "name": "Webhook Generar Reporte",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                240,
+                480
+            ],
+            "webhookId": "wf3-generate-report"
+        },
+        {
+            "parameters": {
                 "operation": "executeQuery",
                 "query": "SELECT p.sku, p.nombre, p.categoria, p.stock_actual, p.stock_minimo, p.fecha_vencimiento::text, CASE WHEN p.stock_actual <= p.stock_minimo THEN 'STOCK_BAJO' WHEN p.fecha_vencimiento IS NOT NULL AND p.fecha_vencimiento <= CURRENT_DATE + INTERVAL '30 days' THEN 'VENCIMIENTO_PROXIMO' ELSE 'OK' END AS estado FROM productos p WHERE p.activo = true ORDER BY estado DESC, p.sku;",
                 "options": {}
@@ -123,7 +140,7 @@
         },
         {
             "parameters": {
-                "fileName": "=/data/outbox/{{ $json.archivo }}",
+                "fileName": "=/data/outbox/{{ $json.archivo.replace('.txt', '') }}_{{ $now.toFormat('yyyyLLdd_HHmmss') }}.txt",
                 "dataPropertyName": "data",
                 "options": {}
             },
@@ -138,7 +155,7 @@
         },
         {
             "parameters": {
-                "fileName": "=/data/reports/{{ $json.archivo }}",
+                "fileName": "=/data/reports/{{ $json.archivo.replace('.' + $json.tipo, '') }}_{{ $now.toFormat('yyyyLLdd_HHmmss') }}.{{ $json.tipo }}",
                 "dataPropertyName": "data",
                 "options": {}
             },
@@ -175,6 +192,17 @@
     ],
     "connections": {
         "Cron Semanal (Lunes 8am)": {
+            "main": [
+                [
+                    {
+                        "node": "SELECT Inventario Completo",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Webhook Generar Reporte": {
             "main": [
                 [
                     {
